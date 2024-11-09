@@ -7,7 +7,7 @@
 #include <signal.h>
 
 #define DEFAULT_INTERVAL 5  // Intervalo predeterminado en segundos si no se proporciona uno
-#define MAX_LOGS 5  // Máximo de logs recientes a mostrar por servicio
+#define MAX_LOGS 40 // Máximo de logs recientes a mostrar por servicio
 
 pthread_mutex_t log_mutex;
 char **services;
@@ -62,14 +62,14 @@ void monitor_service_logs(int service_index) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             pthread_mutex_lock(&log_mutex);  // Bloqueo mutex antes de procesar logs
 
-            if (strstr(line, "EMERG") || strstr(line, "<0>")) counts->emerg++;
-            else if (strstr(line, "ALERT") || strstr(line, "<1>")) counts->alert++;
-            else if (strstr(line, "CRIT") || strstr(line, "<2>")) counts->crit++;
-            else if (strstr(line, "ERR") || strstr(line, "<3>")) counts->err++;
-            else if (strstr(line, "WARN") || strstr(line, "<4>") || strstr(line, "WARNING")) counts->warn++;
-            else if (strstr(line, "NOTICE") || strstr(line, "<5>")) counts->notice++;
-            else if (strstr(line, "INFO") || strstr(line, "<6>")) counts->info++;
-            else if (strstr(line, "DEBUG") || strstr(line, "<7>")) counts->debug++;
+            if (strstr(line, "EMERG") || strstr(line, "<0>") || strstr(line, "<emerg>")) counts->emerg++;
+            else if (strstr(line, "ALERT") || strstr(line, "<1>") || strstr(line, "<alert>")) counts->alert++;
+            else if (strstr(line, "CRIT") || strstr(line, "<2>") || strstr(line, "<crit>")) counts->crit++;
+            else if (strstr(line, "ERR") || strstr(line, "<3>") || strstr(line, "<err>")) counts->err++;
+            else if (strstr(line, "WARN") || strstr(line, "<4>") || strstr(line, "<warn>")) counts->warn++;
+            else if (strstr(line, "NOTICE") || strstr(line, "<5>") || strstr(line, "<notice>")) counts->notice++;
+            else if (strstr(line, "INFO") || strstr(line, "<6>") || strstr(line, "<info>")) counts->info++;
+            else if (strstr(line, "DEBUG") || strstr(line, "<7>") || strstr(line, "<debug>")) counts->debug++;
 
             strncpy(buffer->logs[buffer->next_index], line, sizeof(buffer->logs[buffer->next_index]) - 1);
             buffer->logs[buffer->next_index][sizeof(buffer->logs[buffer->next_index]) - 1] = '\0';
