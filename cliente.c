@@ -2,73 +2,53 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PORT 8080
-#define SERVER_IP "10.0.2.15"  // IP fija del servidor
+// Función para enviar datos al servidor
+void enviar_datos(const char *ip, int puerto, const char *mensaje) {
+    int sock = 0;
+    struct sockaddr_in serv_addr;
 
-int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        printf("Uso: %s <servicio1> <servicio2> ... <intervalo>\n", argv[0]);
-        return EXIT_FAILURE;
+    // Creamos el socket
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        printf("Error: No se pudo crear el socket\n");
+        return;
     }
 
-    // Dirección IP del servidor y número de servicios
-    int num_services = argc - 2;
-    int interval = atoi(argv[argc - 1]);
-    char **services = &argv[1];
-
-    // Crear socket de cliente
-    int client_socket;
-    struct sockaddr_in server_addr;
-
-    if ((client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Error al crear socket");
-        exit(EXIT_FAILURE);
+    // Configuramos la dirección del servidor
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(puerto);
+    
+    // Convertimos la IP del servidor a formato de red
+    if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
+        printf("Dirección inválida o no soportada\n");
+        return;
     }
 
-    // Configurar dirección del servidor
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-
-    // Convertir IP del servidor de texto a binario
-    if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
-        perror("Dirección no válida");
-        exit(EXIT_FAILURE);
+    // Intentamos conectar al servidor
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        printf("Error: Conexión fallida\n");
+        return;
     }
 
-    // Conectar al servidor
-    if (connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Error al conectar");
-        exit(EXIT_FAILURE);
+    // Enviamos el mensaje
+    send(sock, mensaje, strlen(mensaje), 0);
+    printf("Mensaje enviado: %s\n", mensaje);
+
+    // Cerramos el socket
+    close(sock);
+}
+
+int main() {
+    const char *ip = "127.0.0.1";
+    int puerto = 8080;
+
+    while (1) {
+        // Ejecuta agente y captura su salida en un buffer para enviar al servidor
+        system("./agente");  // Ejecuta el programa agente
+        enviar_datos(ip, puerto, "Datos de monitoreo");  // Envía datos al servidor
+        sleep(60);  // Intervalo de ejecución (60 segundos)
     }
-
-    // Construir el mensaje con los servicios y el intervalo
-    char message[1024];
-    strcpy(message, "Servicios: ");
-    for (int i = 0; i < num_services; i++) {
-        strcat(message, services[i]);
-        strcat(message, " ");
-    }
-    char interval_str[50];
-    sprintf(interval_str, "Intervalo: %d segundos", interval);
-    strcat(message, interval_str);
-
-    // Enviar el mensaje al servidor
-    send(client_socket, message, strlen(message), 0);
-
-    // Recibir respuesta del servidor
-    char buffer[1024];
-    int n = recv(client_socket, buffer, sizeof(buffer), 0);
-    if (n > 0) {
-        buffer[n] = '\0';  // Null-terminate the received message
-        printf("Respuesta del servidor: %s\n", buffer);
-    }
-
-    // Cerrar la conexión
-    close(client_socket);
 
     return 0;
 }

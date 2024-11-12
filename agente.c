@@ -6,13 +6,11 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define DEFAULT_INTERVAL 5  // Intervalo predeterminado en segundos si no se proporciona uno
-#define MAX_LOGS 40 // Máximo de logs recientes a mostrar por servicio
+#define MAX_LOGS 5 // Máximo de logs recientes a mostrar por servicio
 
 pthread_mutex_t log_mutex;
 char **services;
 int num_services;
-int interval;
 
 typedef struct {
     int emerg, alert, crit, err, warn, notice, info, debug;
@@ -28,8 +26,7 @@ LogCounts *log_counts;
 LogBuffer *log_buffers;
 
 void initialize(int argc, char *argv[]) {
-    interval = (argc > 2) ? atoi(argv[argc - 1]) : DEFAULT_INTERVAL;
-    num_services = argc - 2;
+    num_services = argc - 1;
     services = &argv[1];
 
     log_counts = malloc(num_services * sizeof(LogCounts));
@@ -71,6 +68,7 @@ void monitor_service_logs(int service_index) {
             else if (strstr(line, "INFO") || strstr(line, "<6>") || strstr(line, "<info>")) counts->info++;
             else if (strstr(line, "DEBUG") || strstr(line, "<7>") || strstr(line, "<debug>")) counts->debug++;
 
+            // Almacenar los últimos logs
             strncpy(buffer->logs[buffer->next_index], line, sizeof(buffer->logs[buffer->next_index]) - 1);
             buffer->logs[buffer->next_index][sizeof(buffer->logs[buffer->next_index]) - 1] = '\0';
             buffer->next_index = (buffer->next_index + 1) % MAX_LOGS;
@@ -84,17 +82,7 @@ void monitor_service_logs(int service_index) {
     }
 }
 
-// Función ejecutada por cada hilo para monitorear un servicio
-void *monitor_service(void *arg) {
-    int service_index = *(int *)arg;
-    while (1) {
-        monitor_service_logs(service_index);
-        sleep(interval);
-    }
-    return NULL;
-}
-
-// Función para mostrar el dashboard en la consola y reiniciar contadores
+// Función para mostrar el dashboard de forma más clara
 void display_dashboard() {
     system("clear");
     printf("------ Dashboard de Logs por Prioridad ------\n");
@@ -103,20 +91,29 @@ void display_dashboard() {
         LogCounts *counts = &log_counts[i];
         LogBuffer *buffer = &log_buffers[i];
 
-        printf("Servicio: %s\n", services[i]);
-        printf("EMERG: %d | ALERT: %d | CRIT: %d | ERR: %d | WARN: %d | NOTICE: %d | INFO: %d | DEBUG: %d\n",
-               counts->emerg, counts->alert, counts->crit, counts->err,
-               counts->warn, counts->notice, counts->info, counts->debug);
-        printf("--------------------------------------------\n");
-        
+        printf("\nServicio: %s\n", services[i]);
+        printf("----------------------------------------------------\n");
+        printf("Prioridad\t\tCantidad de Logs\n");
+        printf("----------------------------------------------------\n");
+        printf("EMERG:\t\t\t%d\n", counts->emerg);
+        printf("ALERT:\t\t\t%d\n", counts->alert);
+        printf("CRIT:\t\t\t%d\n", counts->crit);
+        printf("ERR:\t\t\t%d\n", counts->err);
+        printf("WARN:\t\t\t%d\n", counts->warn);
+        printf("NOTICE:\t\t\t%d\n", counts->notice);
+        printf("INFO:\t\t\t%d\n", counts->info);
+        printf("DEBUG:\t\t\t%d\n", counts->debug);
+        printf("----------------------------------------------------\n");
+
         printf("Últimos %d logs:\n", MAX_LOGS);
         int start = (buffer->next_index + MAX_LOGS - buffer->log_count) % MAX_LOGS;
         for (int j = 0; j < buffer->log_count; j++) {
             int index = (start + j) % MAX_LOGS;
             printf("%s", buffer->logs[index]);
         }
-        printf("--------------------------------------------\n");
+        printf("----------------------------------------------------\n");
 
+        // Limpiar contadores y buffers después de mostrar
         memset(counts, 0, sizeof(LogCounts));
         memset(buffer->logs, 0, sizeof(buffer->logs));
         buffer->log_count = 0;
@@ -124,13 +121,10 @@ void display_dashboard() {
     }
 }
 
-// Función para iniciar y manejar el dashboard en tiempo real
-void start_dashboard() {
-    while (1) {
-        pthread_mutex_lock(&log_mutex);
-        display_dashboard();
-        pthread_mutex_unlock(&log_mutex);
-        sleep(interval);
+// Función para ejecutar el monitoreo una sola vez
+void monitor_services_once() {
+    for (int i = 0; i < num_services; i++) {
+        monitor_service_logs(i);
     }
 }
 
@@ -143,26 +137,17 @@ void cleanup() {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Uso: %s <servicio1> <servicio2> ... [intervalo]\n", argv[0]);
+        fprintf(stderr, "Uso: %s <servicio1> <servicio2> ...\n", argv[0]);
         exit(1);
     }
     initialize(argc, argv);
 
-    pthread_t threads[num_services];
-    int *service_indices = malloc(num_services * sizeof(int));
+    // Monitorear los logs una sola vez
+    monitor_services_once();
 
-    for (int i = 0; i < num_services; i++) {
-        service_indices[i] = i;
-        pthread_create(&threads[i], NULL, monitor_service, &service_indices[i]);
-    }
+    // Mostrar el dashboard
+    display_dashboard();
 
-    start_dashboard();
-
-    for (int i = 0; i < num_services; i++) {
-        pthread_join(threads[i], NULL);
-    }
-
-    free(service_indices);
     cleanup();
     return 0;
 }
