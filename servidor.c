@@ -5,9 +5,9 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define SERVER_PORT 8080        // Puerto en el que el servidor escucha
+#define SERVER_PORT 1234      // Puerto en el que el servidor escucha
 #define MAX_DASHBOARD_SIZE 1024 * 1024  // Máximo tamaño del dashboard recibido
-#define GENERAL_THRESHOLD 10    // Umbral general para el total de logs
+#define GENERAL_THRESHOLD 30    // Umbral general para el total de logs
 
 // Estructura para almacenar la cantidad de logs por prioridad
 typedef struct {
@@ -122,14 +122,24 @@ int main() {
 
     printf("Cliente conectado desde %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
-    // Recibir el dashboard del cliente
-    char dashboard[MAX_DASHBOARD_SIZE];
-    int len;
-    recv(client_fd, &len, sizeof(len), 0);
-    recv(client_fd, dashboard, len, 0);
+    while (1) {
+        // Recibir el dashboard del cliente
+        char dashboard[MAX_DASHBOARD_SIZE];
+        int len;
 
-    // Procesar y verificar el dashboard recibido
-    parse_dashboard_and_check_threshold(dashboard);
+        // Limpiar la variable dashboard antes de recibir datos
+        memset(dashboard, 0, sizeof(dashboard));  // Limpiar cualquier dato previo
+
+        recv(client_fd, &len, sizeof(len), 0);
+        recv(client_fd, dashboard, len, 0);
+
+        // Limpiar la pantalla de la terminal
+        system("clear");  // Limpiar la pantalla antes de mostrar el nuevo dashboard
+
+        // Procesar y verificar el dashboard recibido
+        printf("\nDashboard recibido desde el cliente:\n");
+        parse_dashboard_and_check_threshold(dashboard);
+    }
 
     // Cerrar la conexión con el cliente
     close(client_fd);

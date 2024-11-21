@@ -1,20 +1,64 @@
-// cliente.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <sys/wait.h>  // Incluir para usar wait()
 
 #define SERVER_IP "127.0.0.1"   // IP fija del servidor
-#define SERVER_PORT 8080       // Puerto fijo del servidor
-#define MAX_LOGS 5              // Máximo de logs recientes por servicio
+#define SERVER_PORT 1234      // Puerto fijo del servidor
+#define MAX_DASHBOARD_SIZE 1024 * 1024  // Máximo tamaño del dashboard recibido
 
 // Función para enviar el dashboard al servidor
 void send_dashboard_to_server(int socket_fd, char *dashboard) {
     int len = strlen(dashboard);
     send(socket_fd, &len, sizeof(len), 0);  // Enviar el tamaño del mensaje
     send(socket_fd, dashboard, len, 0);    // Enviar el contenido del dashboard
+}
+
+// Función para ejecutar agente.c usando fork y execv
+int execute_agent(char **args, char *dashboard, size_t max_size) {
+    int pipe_fd[2];
+    if (pipe(pipe_fd) < 0) {
+        perror("Error al crear el pipe");
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("Error al hacer fork");
+        return -1;
+    } else if (pid == 0) {
+        // Proceso hijo
+        close(pipe_fd[0]);          // Cerrar lectura del pipe
+        dup2(pipe_fd[1], STDOUT_FILENO); // Redirigir stdout al pipe
+        close(pipe_fd[1]);          // Cerrar el descriptor original del pipe
+
+        execv("./agente", args);    // Ejecutar agente
+        perror("Error al ejecutar execv"); // Solo si execv falla
+        exit(1);
+    } else {
+        // Proceso padre
+        close(pipe_fd[1]);          // Cerrar escritura del pipe
+        ssize_t total_bytes_read = 0;
+        while (total_bytes_read < max_size - 1) {
+            ssize_t bytes_read = read(pipe_fd[0], dashboard + total_bytes_read, max_size - 1 - total_bytes_read);
+            if (bytes_read < 0) {
+                perror("Error al leer del pipe");
+                close(pipe_fd[0]);
+                return -1;
+            }
+            if (bytes_read == 0) {
+                break;  // Fin de la salida del comando
+            }
+            total_bytes_read += bytes_read;
+        }
+        dashboard[total_bytes_read] = '\0'; // Terminar la cadena
+        close(pipe_fd[0]);
+        wait(NULL);  // Esperar a que el proceso hijo termine
+    }
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -50,27 +94,26 @@ int main(int argc, char *argv[]) {
     }
 
     while (1) {
-        // Construir el comando para ejecutar `agente.c` con todos los servicios
-        char command[2048];
-        snprintf(command, sizeof(command), "./agente");
-
-        // Agregar los servicios al comando
+        // Preparar los argumentos para execv
+        char *args[num_services + 2];
+        args[0] = "./agente";
         for (int i = 0; i < num_services; i++) {
-            snprintf(command + strlen(command), sizeof(command) - strlen(command), " %s", services[i]);
+            args[i + 1] = services[i];
         }
+        args[num_services + 1] = NULL;
 
-        // Ejecutar agente.c y obtener el dashboard
-        FILE *fp = popen(command, "r");
-        if (fp == NULL) {
-            perror("Error al ejecutar agente.c");
+        // Ejecutar agente y obtener el dashboard
+        char dashboard[MAX_DASHBOARD_SIZE];  // Aseguramos un tamaño suficiente para el dashboard
+        if (execute_agent(args, dashboard, sizeof(dashboard)) < 0) {
+            fprintf(stderr, "Error al ejecutar agente\n");
             close(socket_fd);
             exit(1);
         }
 
-        // Leer la salida de `agente.c` y almacenarla en el dashboard
-        char dashboard[1024 * 1024];  // Asumimos un tamaño máximo para el dashboard
-        fread(dashboard, 1, sizeof(dashboard), fp);
-        fclose(fp);
+        // Mostrar el dashboard en el cliente
+        printf("\nDashboard generado por el cliente:\n");
+        printf("-------------------------------------\n");
+        printf("%s\n", dashboard);  // Mostrar el dashboard antes de enviarlo
 
         // Enviar el dashboard al servidor
         send_dashboard_to_server(socket_fd, dashboard);
