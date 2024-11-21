@@ -14,8 +14,13 @@ typedef struct {
     int emerg, alert, crit, err, warn, notice, info, debug;
 } LogCounts;
 
+// Estructura para registrar si se ha notificado el umbral para cada servicio
+typedef struct {
+    int umbral_notificado;  // 0 si no se ha notificado, 1 si ya se notificó
+} ServiceNotificationStatus;
+
 // Función para analizar el dashboard recibido
-void parse_dashboard_and_check_threshold(char *dashboard) {
+void parse_dashboard_and_check_threshold(char *dashboard, ServiceNotificationStatus *notification_status) {
     char *line = strtok(dashboard, "\n");
     while (line != NULL) {
         // Buscar la línea con los servicios
@@ -71,12 +76,28 @@ void parse_dashboard_and_check_threshold(char *dashboard) {
 
             // Verificar si el total de logs supera el umbral general
             if (total_logs > GENERAL_THRESHOLD) {
-                printf("¡UMBRAL GENERAL SUPERADO! Se enviará notificación por WhatsApp.\n");
-                // Aquí iría el código para enviar el mensaje por WhatsApp
+                // Verificar si ya se envió una notificación para este servicio
+                if (notification_status->umbral_notificado == 0) {
+                    printf("¡UMBRAL GENERAL SUPERADO en %s! Se enviará notificación por WhatsApp.\n", service_name);
+                    // Aquí iría el código para enviar el mensaje por WhatsApp
+                    notification_status->umbral_notificado = 1;  // Marcar como notificado
+                }
+            } else {
+                // Si el total de logs está por debajo del umbral, reiniciar el estado de notificación
+                notification_status->umbral_notificado = 0;
             }
         }
         line = strtok(NULL, "\n");
     }
+}
+
+void borrar_logs_journalctl() {
+    printf("Borrando logs de journalctl...\n");
+    // Ejecuta el comando para vaciar los logs de journal (si es posible)
+    system("sudo journalctl --rotate");  // Rotar los logs
+    system("sudo journalctl --vacuum-time=1s");  // Eliminar todos los logs antiguos
+    // Alternativa: Limitar tamaño del log a 1MB
+    // system("sudo journalctl --vacuum-size=1M");
 }
 
 int main() {
@@ -108,6 +129,10 @@ int main() {
     }
 
     printf("Esperando conexiones en el puerto %d...\n", SERVER_PORT);
+    borrar_logs_journalctl();
+
+    // Estructura para llevar control de las notificaciones por servicio
+    ServiceNotificationStatus notification_status = {0};
 
     // Aceptar conexión del cliente
     int client_fd;
@@ -138,7 +163,7 @@ int main() {
 
         // Procesar y verificar el dashboard recibido
         printf("\nDashboard recibido desde el cliente:\n");
-        parse_dashboard_and_check_threshold(dashboard);
+        parse_dashboard_and_check_threshold(dashboard, &notification_status);
     }
 
     // Cerrar la conexión con el cliente

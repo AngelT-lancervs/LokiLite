@@ -61,14 +61,15 @@ void monitor_service_logs(int service_index) {
 
             // Comprobar prioridades
             if (strstr(line, "EMERG") || strstr(line, "<0>") || strstr(line, "<emerg>")) counts->emerg++;
-            else if (strstr(line, "ALERT") || strstr(line, "<1>") || strstr(line, "<alert>")) counts->alert++;
+            else if (strstr(line, "ALERT") || strstr(line, "<1>") || strstr(line, "<alert>") || strstr(line, "Accepted")) counts->alert++;
             else if (strstr(line, "CRIT") || strstr(line, "<2>") || strstr(line, "<crit>")) counts->crit++;
-            else if (strstr(line, "ERR") || strstr(line, "<3>") || strstr(line, "<err>")) counts->err++;
-            else if (strstr(line, "WARN") || strstr(line, "<4>") || strstr(line, "<warn>")) counts->warn++;
-            else if (strstr(line, "NOTICE") || strstr(line, "<5>") || strstr(line, "<notice>")) counts->notice++;
+            else if (strstr(line, "ERR") || strstr(line, "<3>") || strstr(line, "<err>") || strstr(line, "error") || strstr(line, "Failed")) counts->err++;
+            else if (strstr(line, "WARN") || strstr(line, "<4>") || strstr(line, "<warn>") ) counts->warn++;
+            else if (strstr(line, "NOTICE") || strstr(line, "<5>") || strstr(line, "<notice>") || strstr(line, "Start")) counts->notice++;
             else if (strstr(line, "INFO") || strstr(line, "<6>") || strstr(line, "<info>")) counts->info++;
             else if (strstr(line, "DEBUG") || strstr(line, "<7>") || strstr(line, "<debug>")) counts->debug++;
-            else { // Si no se encuentra ningún identificador, asignar INFO por defecto
+            else { 
+                // Si no hay coincidencias, asignar INFO por defecto
                 counts->info++;
             }
 
