@@ -5,121 +5,135 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define SERVER_PORT 8080       // Puerto del servidor
-#define MAX_LOG_SIZE 4096      // Tamaño máximo del log recibido
+#define SERVER_PORT 8080        // Puerto en el que el servidor escucha
+#define MAX_DASHBOARD_SIZE 1024 * 1024  // Máximo tamaño del dashboard recibido
+#define GENERAL_THRESHOLD 10    // Umbral general para el total de logs
 
-// Función para enviar la alerta por WhatsApp (implementación pendiente)
-void enviar_alerta_whatsapp(const char *mensaje) {
-    // Aquí se debe incluir el código para enviar el mensaje a través de WhatsApp
-    // Este código dependería de la API o la librería que uses para el envío
-    printf("Enviando alerta de WhatsApp: %s\n", mensaje);
-}
+// Estructura para almacenar la cantidad de logs por prioridad
+typedef struct {
+    int emerg, alert, crit, err, warn, notice, info, debug;
+} LogCounts;
 
-// Función para analizar los logs y verificar si se superan los umbrales
-void analizar_logs_y_enviar_alerta(const char *data) {
-    int info_count = 0, notice_count = 0;
-    int emerg_count = 0, err_count = 0, warn_count = 0, crit_count = 0, alert_count = 0;
-
-    // Copiar los datos para usar strtok, ya que strtok modifica la cadena
-    char *data_copy = strdup(data);  // Copia de la cadena
-
-    // Analizamos la cadena de logs para contar las ocurrencias de cada tipo
-    char *line = strtok(data_copy, "\n");  // Usamos strtok en la copia de los datos
+// Función para analizar el dashboard recibido
+void parse_dashboard_and_check_threshold(char *dashboard) {
+    char *line = strtok(dashboard, "\n");
     while (line != NULL) {
-        if (strstr(line, "INFO")) info_count++;
-        else if (strstr(line, "NOTICE")) notice_count++;
-        else if (strstr(line, "EMERG")) emerg_count++;
-        else if (strstr(line, "ERR")) err_count++;
-        else if (strstr(line, "WARN")) warn_count++;
-        else if (strstr(line, "CRIT")) crit_count++;
-        else if (strstr(line, "ALERT")) alert_count++;
+        // Buscar la línea con los servicios
+        if (strncmp(line, "Servicio: ", 10) == 0) {
+            // Extraemos el nombre del servicio
+            char *service_name = line + 10;
+            printf("\nServicio: %s\n", service_name);
+            LogCounts counts = {0};
 
-        line = strtok(NULL, "\n");  // Obtener la siguiente línea de log
+            // Leer las prioridades y contar los logs
+            while ((line = strtok(NULL, "\n")) != NULL) {
+                if (strncmp(line, "EMERG:", 6) == 0) {
+                    sscanf(line, "EMERG:\t\t\t%d", &counts.emerg);
+                } else if (strncmp(line, "ALERT:", 6) == 0) {
+                    sscanf(line, "ALERT:\t\t\t%d", &counts.alert);
+                } else if (strncmp(line, "CRIT:", 5) == 0) {
+                    sscanf(line, "CRIT:\t\t\t%d", &counts.crit);
+                } else if (strncmp(line, "ERR:", 4) == 0) {
+                    sscanf(line, "ERR:\t\t\t%d", &counts.err);
+                } else if (strncmp(line, "WARN:", 5) == 0) {
+                    sscanf(line, "WARN:\t\t\t%d", &counts.warn);
+                } else if (strncmp(line, "NOTICE:", 7) == 0) {
+                    sscanf(line, "NOTICE:\t\t\t%d", &counts.notice);
+                } else if (strncmp(line, "INFO:", 5) == 0) {
+                    sscanf(line, "INFO:\t\t\t%d", &counts.info);
+                } else if (strncmp(line, "DEBUG:", 6) == 0) {
+                    sscanf(line, "DEBUG:\t\t\t%d", &counts.debug);
+                }
+
+                // Mostrar las prioridades
+                if (strncmp(line, "Últimos", 7) == 0) {
+                    break;  // Llegamos a la sección de últimos logs, por lo que terminamos de procesar
+                }
+            }
+
+            // Sumar el total de logs para el servicio
+            int total_logs = counts.emerg + counts.alert + counts.crit + counts.err + counts.warn +
+                             counts.notice + counts.info + counts.debug;
+
+            // Mostrar el dashboard para este servicio
+            printf("----------------------------------------------------\n");
+            printf("Prioridades:\n");
+            printf("EMERG: %d\n", counts.emerg);
+            printf("ALERT: %d\n", counts.alert);
+            printf("CRIT: %d\n", counts.crit);
+            printf("ERR: %d\n", counts.err);
+            printf("WARN: %d\n", counts.warn);
+            printf("NOTICE: %d\n", counts.notice);
+            printf("INFO: %d\n", counts.info);
+            printf("DEBUG: %d\n", counts.debug);
+            printf("Total de logs: %d\n", total_logs);
+            printf("----------------------------------------------------\n");
+
+            // Verificar si el total de logs supera el umbral general
+            if (total_logs > GENERAL_THRESHOLD) {
+                printf("¡UMBRAL GENERAL SUPERADO! Se enviará notificación por WhatsApp.\n");
+                // Aquí iría el código para enviar el mensaje por WhatsApp
+            }
+        }
+        line = strtok(NULL, "\n");
     }
-
-    // Liberar la memoria de la copia
-    free(data_copy);
-
-    // Verificar si alguna de las condiciones de umbral se cumple
-    if ((info_count + notice_count > 100) || emerg_count > 0 || err_count > 0 || warn_count > 0 || crit_count > 0 || alert_count > 0) {
-        char mensaje[1024];
-        snprintf(mensaje, sizeof(mensaje), "Alerta: Se han superado los umbrales de logs!\n"
-                                          "INFO: %d, NOTICE: %d, EMERG: %d, ERR: %d, WARN: %d, CRIT: %d, ALERT: %d",
-                                          info_count, notice_count, emerg_count, err_count, warn_count, crit_count, alert_count);
-        enviar_alerta_whatsapp(mensaje);  // Enviar alerta por WhatsApp
-    }
-}
-
-// Función para manejar la conexión con el cliente
-void manejar_conexion(int client_socket) {
-    char buffer[MAX_LOG_SIZE];
-
-    // Recibir los datos del cliente
-    int bytes_recibidos = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_recibidos < 0) {
-        perror("Error recibiendo datos");
-        close(client_socket);
-        return;
-    }
-
-    buffer[bytes_recibidos] = '\0';  // Asegurar que la cadena esté terminada en nulo
-
-    printf("Datos recibidos:\n%s\n", buffer);
-
-    // Analizar los logs y enviar alerta si es necesario
-    analizar_logs_y_enviar_alerta(buffer);
-
-    close(client_socket);  // Cerrar la conexión con el cliente
 }
 
 int main() {
-    int server_socket, client_socket;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-
-    // Crear el socket del servidor
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) {
-        perror("Error creando el socket");
+    // Crear socket para recibir conexiones de clientes
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("Error al crear el socket");
         exit(1);
     }
 
-    // Configurar la dirección del servidor
-    memset(&server_addr, 0, sizeof(server_addr));
+    // Configurar dirección del servidor
+    struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;  // Aceptar conexiones de cualquier dirección
     server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
 
-    // Enlazar el socket con la dirección
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Error al enlazar el socket");
-        close(server_socket);
+    // Asociar el socket con la dirección
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Error al asociar el socket");
+        close(server_fd);
         exit(1);
     }
 
     // Escuchar conexiones entrantes
-    if (listen(server_socket, 5) < 0) {
-        perror("Error al escuchar en el socket");
-        close(server_socket);
+    if (listen(server_fd, 5) < 0) {
+        perror("Error al escuchar el socket");
+        close(server_fd);
         exit(1);
     }
 
     printf("Esperando conexiones en el puerto %d...\n", SERVER_PORT);
 
-    while (1) {
-        // Aceptar una conexión entrante
-        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client_socket < 0) {
-            perror("Error al aceptar conexión");
-            continue;
-        }
-
-        printf("Conexión aceptada.\n");
-
-        // Manejar la conexión con el cliente
-        manejar_conexion(client_socket);
+    // Aceptar conexión del cliente
+    int client_fd;
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+    if (client_fd < 0) {
+        perror("Error al aceptar la conexión");
+        close(server_fd);
+        exit(1);
     }
 
-    close(server_socket);  // Cerrar el socket del servidor
+    printf("Cliente conectado desde %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+    // Recibir el dashboard del cliente
+    char dashboard[MAX_DASHBOARD_SIZE];
+    int len;
+    recv(client_fd, &len, sizeof(len), 0);
+    recv(client_fd, dashboard, len, 0);
+
+    // Procesar y verificar el dashboard recibido
+    parse_dashboard_and_check_threshold(dashboard);
+
+    // Cerrar la conexión con el cliente
+    close(client_fd);
+    close(server_fd);
+
     return 0;
 }
