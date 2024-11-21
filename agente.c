@@ -59,6 +59,7 @@ void monitor_service_logs(int service_index) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             pthread_mutex_lock(&log_mutex);  // Bloqueo mutex antes de procesar logs
 
+            // Comprobar prioridades
             if (strstr(line, "EMERG") || strstr(line, "<0>") || strstr(line, "<emerg>")) counts->emerg++;
             else if (strstr(line, "ALERT") || strstr(line, "<1>") || strstr(line, "<alert>")) counts->alert++;
             else if (strstr(line, "CRIT") || strstr(line, "<2>") || strstr(line, "<crit>")) counts->crit++;
@@ -67,6 +68,9 @@ void monitor_service_logs(int service_index) {
             else if (strstr(line, "NOTICE") || strstr(line, "<5>") || strstr(line, "<notice>")) counts->notice++;
             else if (strstr(line, "INFO") || strstr(line, "<6>") || strstr(line, "<info>")) counts->info++;
             else if (strstr(line, "DEBUG") || strstr(line, "<7>") || strstr(line, "<debug>")) counts->debug++;
+            else { // Si no se encuentra ningún identificador, asignar INFO por defecto
+                counts->info++;
+            }
 
             // Almacenar los últimos logs
             strncpy(buffer->logs[buffer->next_index], line, sizeof(buffer->logs[buffer->next_index]) - 1);

@@ -1,64 +1,64 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <pthread.h>
-#include <string.h>
+#include <unistd.h>
 
-#define MIN_SERVICES 2
-
-// Estructura para pasar el nombre del servicio y el intervalo
-typedef struct {
-    char service_name[256];
-    int interval;
-} ServiceArgs;
-
-// Función de estrés que reinicia el servicio en intervalos regulares
-void *stress_service(void *arg) {
-    ServiceArgs *service_args = (ServiceArgs *)arg;
-    char command[300];
-    snprintf(command, sizeof(command), "sudo systemctl restart %s", service_args->service_name);
-
-    while (1) {
-        printf("Reiniciando servicio: %s\n", service_args->service_name);
-        int result = system(command);
-        if (result == -1) {
-            perror("Error al ejecutar comando de reinicio");
-            pthread_exit(NULL);
-        }
-        sleep(service_args->interval);
+void *generar_estrés_ssh(void *arg) {
+    // Comando SSH fallido
+    char *comando_ssh = "sshpass -p 'contraseñaincorrecta' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null usuario@localhost exit";
+    for (int i = 0; i < 3; i++) {  // Ejecutar la prueba de estrés SSH 3 veces
+        system(comando_ssh);  // Intento de conexión fallido
+        sleep(1); // Ajusta el tiempo de espera si es necesario
     }
+    return NULL;
 }
 
-int main(int argc, char *argv[]) {
-    if (argc < MIN_SERVICES + 2) {
-        fprintf(stderr, "Uso: %s <servicio1> <servicio2> ... <intervalo_en_segundos>\n", argv[0]);
-        exit(EXIT_FAILURE);
+void *generar_estrés_network_manager(void *arg) {
+    char *interface = "eth0";  // Cambia esto si usas una interfaz diferente
+    for (int i = 0; i < 3; i++) {  // Ejecutar la prueba de estrés en NetworkManager 3 veces
+        // Desconectar la interfaz de red
+        char comando_desconectar[256];
+        snprintf(comando_desconectar, sizeof(comando_desconectar), "nmcli device disconnect %s", interface);
+        system(comando_desconectar);  // Ejecutar el comando para desconectar la interfaz
+
+        sleep(1); // Espera antes de reconectar la interfaz
+
+        // Reconectar la interfaz de red
+        char comando_conectar[256];
+        snprintf(comando_conectar, sizeof(comando_conectar), "nmcli device connect %s", interface);
+        system(comando_conectar);  // Ejecutar el comando para reconectar la interfaz
+
+        sleep(1); // Ajusta el tiempo de espera si es necesario
     }
+    return NULL;
+}
 
-    int num_services = argc - 2;
-    int interval = atoi(argv[argc - 1]);
+int main() {
+    pthread_t tid_ssh, tid_network_manager;
 
-    if (interval <= 0) {
-        fprintf(stderr, "El intervalo debe ser mayor a 0\n");
-        exit(EXIT_FAILURE);
-    }
-
-    pthread_t threads[num_services];
-    ServiceArgs service_args[num_services];
-
-    for (int i = 0; i < num_services; i++) {
-        strncpy(service_args[i].service_name, argv[i + 1], sizeof(service_args[i].service_name) - 1);
-        service_args[i].service_name[sizeof(service_args[i].service_name) - 1] = '\0';
-        service_args[i].interval = interval;
-
-        if (pthread_create(&threads[i], NULL, stress_service, &service_args[i]) != 0) {
-            perror("Error al crear hilo de estrés para el servicio");
+    // Alternar entre las pruebas de red y SSH indefinidamente
+    while (1) {
+        // Crear hilo para generar estrés en SSH
+        int res_ssh = pthread_create(&tid_ssh, NULL, generar_estrés_ssh, NULL);
+        if (res_ssh != 0) {
+            perror("Error al crear el hilo SSH");
             exit(EXIT_FAILURE);
         }
-    }
 
-    for (int i = 0; i < num_services; i++) {
-        pthread_join(threads[i], NULL);
+        // Esperar que el hilo SSH termine
+        pthread_join(tid_ssh, NULL);
+
+        // Crear hilo para generar estrés en NetworkManager
+        int res_network_manager = pthread_create(&tid_network_manager, NULL, generar_estrés_network_manager, NULL);
+        if (res_network_manager != 0) {
+            perror("Error al crear el hilo de NetworkManager");
+            exit(EXIT_FAILURE);
+        }
+
+        // Esperar que el hilo de NetworkManager termine
+        pthread_join(tid_network_manager, NULL);
+
+        // Repetir el ciclo alternando entre las pruebas
     }
 
     return 0;
