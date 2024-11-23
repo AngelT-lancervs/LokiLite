@@ -1,6 +1,6 @@
 # Definición de compilador y banderas
 CC = gcc
-CFLAGS = -lpthread
+CFLAGS = -lpthread -lcurl  # Agregar la biblioteca de curl
 
 # Definición de nombres de los ejecutables
 AGENT_EXEC = agente

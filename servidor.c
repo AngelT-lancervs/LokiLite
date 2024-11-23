@@ -4,10 +4,11 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <curl/curl.h>
 
-#define SERVER_PORT 1234      // Puerto en el que el servidor escucha
-#define MAX_DASHBOARD_SIZE 1024 * 1024  // Máximo tamaño del dashboard recibido
-#define GENERAL_THRESHOLD 30    // Umbral general para el total de logs
+#define SERVER_PORT 1234       // Puerto en el que el servidor escucha
+#define MAX_DASHBOARD_SIZE 1024 * 1024  // Tamaño máximo del dashboard recibido
+#define GENERAL_THRESHOLD 20   // Umbral general para el total de logs
 
 // Estructura para almacenar la cantidad de logs por prioridad
 typedef struct {
@@ -16,21 +17,38 @@ typedef struct {
 
 // Estructura para registrar si se ha notificado el umbral para cada servicio
 typedef struct {
+    char service_name[256];  // Nombre del servicio
     int umbral_notificado;  // 0 si no se ha notificado, 1 si ya se notificó
 } ServiceNotificationStatus;
 
-// Función para analizar el dashboard recibido
-void parse_dashboard_and_check_threshold(char *dashboard, ServiceNotificationStatus *notification_status) {
+// Función para enviar notificación por WhatsApp usando Twilio
+void enviar_notificacion_whatsapp(const char *service_name) {
+    // Crear el comando para ejecutar el script Python con el nombre del servicio como argumento
+    char command[512];
+    snprintf(command, sizeof(command), "python3 enviar_mensaje.py \"%s\"", service_name);
+
+    // Ejecutar el comando
+    int result = system(command);
+
+    // Verificar si hubo un error al ejecutar el comando
+    if (result == -1) {
+        perror("Error al ejecutar el script de WhatsApp");
+    } else {
+        printf("Notificación enviada a WhatsApp para el servicio: %s\n", service_name);
+    }
+}
+
+// Función para analizar el dashboard recibido y verificar umbrales
+void parse_dashboard_and_check_threshold(char *dashboard, ServiceNotificationStatus *notification_status, int *notification_count) {
     char *line = strtok(dashboard, "\n");
+
     while (line != NULL) {
-        // Buscar la línea con los servicios
         if (strncmp(line, "Servicio: ", 10) == 0) {
-            // Extraemos el nombre del servicio
             char *service_name = line + 10;
             printf("\nServicio: %s\n", service_name);
             LogCounts counts = {0};
 
-            // Leer las prioridades y contar los logs
+            // Extraer los log counts
             while ((line = strtok(NULL, "\n")) != NULL) {
                 if (strncmp(line, "EMERG:", 6) == 0) {
                     sscanf(line, "EMERG:\t\t\t%d", &counts.emerg);
@@ -49,18 +67,14 @@ void parse_dashboard_and_check_threshold(char *dashboard, ServiceNotificationSta
                 } else if (strncmp(line, "DEBUG:", 6) == 0) {
                     sscanf(line, "DEBUG:\t\t\t%d", &counts.debug);
                 }
-
-                // Mostrar las prioridades
                 if (strncmp(line, "Últimos", 7) == 0) {
-                    break;  // Llegamos a la sección de últimos logs, por lo que terminamos de procesar
+                    break;
                 }
             }
 
-            // Sumar el total de logs para el servicio
-            int total_logs = counts.emerg + counts.alert + counts.crit + counts.err + counts.warn +
-                             counts.notice + counts.info + counts.debug;
+            int total_logs = counts.emerg + counts.alert + counts.crit + counts.err +
+                             counts.warn + counts.notice + counts.info + counts.debug;
 
-            // Mostrar el dashboard para este servicio
             printf("----------------------------------------------------\n");
             printf("Prioridades:\n");
             printf("EMERG: %d\n", counts.emerg);
@@ -74,54 +88,59 @@ void parse_dashboard_and_check_threshold(char *dashboard, ServiceNotificationSta
             printf("Total de logs: %d\n", total_logs);
             printf("----------------------------------------------------\n");
 
-            // Verificar si el total de logs supera el umbral general
+            // Si el total de logs supera el umbral y no se ha enviado la notificación para este servicio
             if (total_logs > GENERAL_THRESHOLD) {
-                // Verificar si ya se envió una notificación para este servicio
-                if (notification_status->umbral_notificado == 0) {
-                    printf("¡UMBRAL GENERAL SUPERADO en %s! Se enviará notificación por WhatsApp.\n", service_name);
-                    // Aquí iría el código para enviar el mensaje por WhatsApp
-                    notification_status->umbral_notificado = 1;  // Marcar como notificado
+                int already_notified = 0;
+                // Comprobar si ya se ha enviado la notificación para este servicio
+                for (int i = 0; i < *notification_count; i++) {
+                    if (strcmp(notification_status[i].service_name, service_name) == 0 &&
+                        notification_status[i].umbral_notificado == 1) {
+                        already_notified = 1;
+                        break;
+                    }
                 }
-            } else {
-                // Si el total de logs está por debajo del umbral, reiniciar el estado de notificación
-                notification_status->umbral_notificado = 0;
+
+                if (!already_notified) {
+                    // Enviar notificación por WhatsApp
+                    printf("¡UMBRAL GENERAL SUPERADO en %s! Se enviará notificación por WhatsApp.\n", service_name);
+                    enviar_notificacion_whatsapp(service_name);
+
+                    // Registrar que se ha enviado la notificación para este servicio
+                    strcpy(notification_status[*notification_count].service_name, service_name);
+                    notification_status[*notification_count].umbral_notificado = 1;
+                    (*notification_count)++;
+                }
             }
         }
         line = strtok(NULL, "\n");
     }
 }
 
+// Función para borrar logs usando journalctl
 void borrar_logs_journalctl() {
     printf("Borrando logs de journalctl...\n");
-    // Ejecuta el comando para vaciar los logs de journal (si es posible)
-    system("sudo journalctl --rotate");  // Rotar los logs
-    system("sudo journalctl --vacuum-time=1s");  // Eliminar todos los logs antiguos
-    // Alternativa: Limitar tamaño del log a 1MB
-    // system("sudo journalctl --vacuum-size=1M");
+    system("sudo journalctl --rotate");
+    system("sudo journalctl --vacuum-time=1s");
 }
 
 int main() {
-    // Crear socket para recibir conexiones de clientes
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         perror("Error al crear el socket");
         exit(1);
     }
 
-    // Configurar dirección del servidor
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(SERVER_PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
-    // Asociar el socket con la dirección
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Error al asociar el socket");
         close(server_fd);
         exit(1);
     }
 
-    // Escuchar conexiones entrantes
     if (listen(server_fd, 5) < 0) {
         perror("Error al escuchar el socket");
         close(server_fd);
@@ -131,10 +150,9 @@ int main() {
     printf("Esperando conexiones en el puerto %d...\n", SERVER_PORT);
     borrar_logs_journalctl();
 
-    // Estructura para llevar control de las notificaciones por servicio
-    ServiceNotificationStatus notification_status = {0};
+    ServiceNotificationStatus notification_status[100];  // Array para guardar el estado de las notificaciones
+    int notification_count = 0;  // Contador de servicios para saber cuántos servicios han sido notificados
 
-    // Aceptar conexión del cliente
     int client_fd;
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
@@ -148,25 +166,20 @@ int main() {
     printf("Cliente conectado desde %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
     while (1) {
-        // Recibir el dashboard del cliente
         char dashboard[MAX_DASHBOARD_SIZE];
         int len;
 
-        // Limpiar la variable dashboard antes de recibir datos
-        memset(dashboard, 0, sizeof(dashboard));  // Limpiar cualquier dato previo
+        memset(dashboard, 0, sizeof(dashboard));
 
         recv(client_fd, &len, sizeof(len), 0);
         recv(client_fd, dashboard, len, 0);
 
-        // Limpiar la pantalla de la terminal
-        system("clear");  // Limpiar la pantalla antes de mostrar el nuevo dashboard
+        system("clear");
 
-        // Procesar y verificar el dashboard recibido
         printf("\nDashboard recibido desde el cliente:\n");
-        parse_dashboard_and_check_threshold(dashboard, &notification_status);
+        parse_dashboard_and_check_threshold(dashboard, notification_status, &notification_count);
     }
 
-    // Cerrar la conexión con el cliente
     close(client_fd);
     close(server_fd);
 
