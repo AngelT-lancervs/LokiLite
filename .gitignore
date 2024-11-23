@@ -2,4 +2,5 @@ agente
 servidor
 prueba_stress
 cliente
-so
+pythonvenv
+.env
