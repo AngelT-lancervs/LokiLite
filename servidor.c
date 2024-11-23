@@ -6,9 +6,9 @@
 #include <arpa/inet.h>
 #include <curl/curl.h>
 
-#define SERVER_PORT 1234       // Puerto en el que el servidor escucha
-#define MAX_DASHBOARD_SIZE 1024 * 1024  // Tamaño máximo del dashboard recibido
-#define GENERAL_THRESHOLD 20   // Umbral general para el total de logs
+#define SERVER_PORT 1234 
+#define MAX_DASHBOARD_SIZE 1024 * 1024
+#define GENERAL_THRESHOLD 20
 
 // Estructura para almacenar la cantidad de logs por prioridad
 typedef struct {
@@ -17,13 +17,12 @@ typedef struct {
 
 // Estructura para registrar si se ha notificado el umbral para cada servicio
 typedef struct {
-    char service_name[256];  // Nombre del servicio
-    int umbral_notificado;  // 0 si no se ha notificado, 1 si ya se notificó
+    char service_name[256];  
+    int umbral_notificado;
 } ServiceNotificationStatus;
 
 // Función para enviar notificación por WhatsApp usando Twilio
 void enviar_notificacion_whatsapp(const char *service_name) {
-    // Crear el comando para ejecutar el script Python con el nombre del servicio como argumento
     char command[512];
     snprintf(command, sizeof(command), "python3 enviar_mensaje.py \"%s\"", service_name);
 

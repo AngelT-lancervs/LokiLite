@@ -6,8 +6,9 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define MAX_LOGS 5 // Máximo de logs recientes a mostrar por servicio
+#define MAX_LOGS 5
 
+//sincroniza el acceso a las estructuras compartidas
 pthread_mutex_t log_mutex;
 char **services;
 int num_services;
